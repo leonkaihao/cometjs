@@ -2,7 +2,6 @@
 
 var EventEmitter = require('events').EventEmitter;
 var uuid = require('uuid');
-var aes = require('../crypto/aes');
 
 function Comet (id, req, resp) {
     this.CODE = {
@@ -166,6 +165,12 @@ function Comet (id, req, resp) {
         return this;        
     };
 
+    //pack data before send
+    this.onPack = function(cb) {
+        this.pkFunc = cb;
+        return this;
+    };
+
     //internal   
     this._send = function (msg, prefix, contentType) {
         if (!prefix) {
@@ -175,18 +180,38 @@ function Comet (id, req, resp) {
             contentType = this.SEND_CONTENT_TYPE_APP;
         }
         var msgStr = JSON.stringify(msg);
-        var msgEnc = aes.aesEnc(msgStr);
-        var bufData = new Buffer(msgEnc);
-        //push to device
-        var fmtHeader = prefix + 'Content-Type: ' + contentType + 
-        '\r\nContent-Length: '+ bufData.length + 
-        '\r\nX-Address: \r\nX-Remote-Address: \r\n\r\n'; //此部分是针对P2P的header field，目前不用
-        var fmtTail = '\r\n--ctalk_boundary';
-        var bufChunks = [Buffer(fmtHeader), bufData, Buffer(fmtTail)];
-        var bufAll = Buffer.concat(bufChunks);
+        var msgPk = msgStr;
+        if (this.pkFunc) {
+            this.pkFunc(msgPk, function(err, data) {
+                if (err) {
+                    this.errFunc(err);
+                    return;
+                }
+                msgPk = data;
 
-        console.log('comet push msg :',msgStr);
-        this.resp.write(bufAll);
+                var bufData = new Buffer(msgPk);
+                //push to device
+                var fmtHeader = prefix + 'Content-Type: ' + contentType + 
+                '\r\nContent-Length: '+ bufData.length + '\r\n\r\n';
+                var fmtTail = '\r\n--ctalk_boundary';
+                var bufChunks = [Buffer(fmtHeader), bufData, Buffer(fmtTail)];
+                var bufAll = Buffer.concat(bufChunks);
+
+                console.log('comet push msg :',msgStr);
+                this.resp.write(bufAll);
+            });
+        } else {
+            var bufData = new Buffer(msgPk);
+            //push to device
+            var fmtHeader = prefix + 'Content-Type: ' + contentType + 
+            '\r\nContent-Length: '+ bufData.length + '\r\n\r\n';
+            var fmtTail = '\r\n--ctalk_boundary';
+            var bufChunks = [Buffer(fmtHeader), bufData, Buffer(fmtTail)];
+            var bufAll = Buffer.concat(bufChunks);
+
+            console.log('comet push msg :',msgStr);
+            this.resp.write(bufAll);
+        } 
     };
 
     this._close = function(reason) {
