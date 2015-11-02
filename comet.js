@@ -1,8 +1,20 @@
 'use strict';
-
+/**
+ * Comet module.
+ * @module comet
+ * @author HaoKai
+ */
 var EventEmitter = require('events').EventEmitter;
 var uuid = require('uuid');
+var aes = require('../crypto/aes');
 
+/** 
+ * Create a comet
+ * @constructor
+ * @param {string} id - Comet id, if it is null then Comet will generate one randomly.
+ * @param {Object} req - A http or express request object.
+ * @param {Object} resp - A http or express response object.
+ */
 function Comet (id, req, resp) {
     this.CODE = {
         CLOSE_TIMEOUT: 'CLOSE_TIMEOUT',
@@ -24,8 +36,125 @@ function Comet (id, req, resp) {
     this.timeId = 0;
     this.closeReason = null;
     this.closeFlag = false;
+
     /**    
-    * API    
+    * Set close event callback
+    * @param {Comet~closeCallback} cb - additional handling of the close event
+    */    
+    this.onClose = function (cb) {
+        this.closeFunc = cb;
+        return this;
+    };
+    /**
+     * This callback is displayed as part of the Comet class.
+     * @callback Comet~closeCallback
+     * @param {Object} event - The close event info.
+     * @param {string} event.code - The event code, may be one of 'CLOSE_TIMEOUT', 'CLOSE_PEER' and 'CLOSE_COMPEL'.
+     * @param {string} event.message - The event additional description.
+     */
+
+    /**    
+    * Set error event callback    
+    * @param {Comet~errorCallback} cb - additional handling of the error event
+    */    
+    this.onError = function (cb) {
+        this.errFunc = cb;
+        return this;
+    };
+    /**
+     * This callback is displayed as part of the Comet class.
+     * @callback Comet~errorCallback
+     * @param {Object} event - The error event info, is an Error object.
+     * @param {string} event.message - The event additional description.
+     */
+
+    /**    
+    * Set send event callback    
+    * @param: {Comet~sendCallback} cb - additional handling of the send event
+    */    
+    this.onSend = function(cb) {
+        this.sendFunc = cb;
+        return this;
+    };
+    /**
+     * This callback is displayed as part of the Comet class.
+     * @callback Comet~sendCallback
+     * @param {Object} event - The send event info, include the detail of a send.
+     * @param {string} event.cid - Comet id.
+     * @param {string} event.sid - Send id.
+     * @param {Object} event.msg - msg object which will be sent to peer.
+     */
+
+    /**    
+    * Set echo event callback    
+    * @param: {Comet~echoCallback} cb - additional handling of the echo event
+    */    
+    this.onEcho = function(cb) {
+        this.echoFunc = cb;
+        return this;
+    };
+    /**
+     * This callback is displayed as part of the Comet class.
+     * @callback Comet~echoCallback
+     * @param {Object} event - The echo event info, include the detail of a echo.
+     * @param {string} event.cid - Comet id of the sender.
+     * @param {string} event.sid - Send id.
+     * @param {Object} event.msg - msg object which got from peer.
+     */
+
+    /**    
+    * Set comet remove event callback    
+    * @param: {Comet~rmCallback} cb - additional handling of the remove event
+    */    
+    this.onRemove = function(cb) {
+        this.rmFunc = cb;
+        return this;        
+    };
+    /**
+     * This callback is displayed as part of the Comet class.
+     * @callback Comet~rmCallback
+     * @param {Object} event - The remove event info.
+     * @param {string} event.cid - Id of a Comet to be removed.
+     */
+
+    /**    
+    * Set heart beat event callback    
+    * @param: {Comet~hbCallback} cb - additional handling of the hearbeat event
+    */    
+    this.onHeart = function(cb) {
+        this.hbFunc = cb;
+        return this;        
+    };
+    /**
+     * This callback is displayed as part of the Comet class.
+     * @callback Comet~hbCallback
+     * @description this function has no param, only a trigger for additional actions 
+     */
+
+    /**    
+    * Set data pack event callback    
+    * @param: {Comet~pkCallback} cb - additional handling of the pack event
+    */    
+    this.onPack = function(cb) {
+        this.pkFunc = cb;
+        return this;
+    };
+    /**
+     * This callback is displayed as part of the Comet class.
+     * @callback Comet~pkCallback
+     * @param {object} event - The pack event info.
+     * @param {Comet~pkCallback~resultCallback} cb - callback function for receiving packed data asynchronously.
+     * @description Event object include all data need to be sent, you can do additional processing like compressing or encoding.
+     */
+    /**
+     * This callback is displayed as part of the comet pack callback function.
+     * @callback Comet~pkCallback~resultCallback
+     * @param {object} err - Value is null if no error, else is an Error object.
+     * @param {string|Buffer} data - Not null if no error.
+     */
+
+    /**    
+    * start comet running loop after all configuration    
     */    
     this.start = function() {
         var self = this;
@@ -48,7 +177,7 @@ function Comet (id, req, resp) {
 
     };
     /**    
-    * API    
+    * Send a message and wait for echo    
     */    
     this.sendMsg = function (msg, contentType, echoCb) {
         var sid = uuid.v4();
@@ -75,14 +204,14 @@ function Comet (id, req, resp) {
     };
 
     /**    
-    * API    
+    * Send a message and do not wait for any echo
     */    
     this.directSend = function (msg) {
         this._send(msg);
     };
 
     /**    
-    * API    
+    * Echo a message corresponding to a send    
     */    
     this.echoMsg = function (msg) {
         var sid = msg.sid;
@@ -95,7 +224,7 @@ function Comet (id, req, resp) {
     };
 
     /**    
-    * API    
+    * Pong a message back after a client ping    
     */    
     this.pongMsg = function (msg, contentType) {
         var self = this;
@@ -111,6 +240,9 @@ function Comet (id, req, resp) {
         }
     };
 
+    /**
+     * release a comet object, used by cometMgr
+     */
     this.del = function() {
         var self = this;
         if (self.closeFlag) {
@@ -122,53 +254,6 @@ function Comet (id, req, resp) {
         self.closeReason = self.CODE.CLOSE_COMPEL;
         self._close();
         self._remove();
-    };
-    /**    
-    * API    
-    */    
-    this.onClose = function (cb) {
-        this.closeFunc = cb;
-        return this;
-    };
-    /**    
-    * API    
-    */    
-    this.onError = function (cb) {
-        this.errFunc = cb;
-        return this;
-    };
-
-    /**    
-    * API    
-    *  cb params: {cid, sid, msg}
-    */    
-    this.onSend = function(cb) {
-        this.sendFunc = cb;
-        return this;
-    };
-
-    /**    
-    * API    
-    */    
-    this.onEcho = function(cb) {
-        this.echoFunc = cb;
-        return this;
-    };
-
-    this.onRemove = function(cb) {
-        this.rmFunc = cb;
-        return this;        
-    };
-
-    this.onHeart = function(cb) {
-        this.hbFunc = cb;
-        return this;        
-    };
-
-    //pack data before send
-    this.onPack = function(cb) {
-        this.pkFunc = cb;
-        return this;
     };
 
     //internal   
