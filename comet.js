@@ -154,7 +154,7 @@ function Comet (id, req, resp) {
      */
 
     /**    
-    * start comet running loop after all configuration    
+    * start comet running loop after all onXXX configuration    
     */    
     this.start = function() {
         var self = this;
@@ -176,8 +176,12 @@ function Comet (id, req, resp) {
         self._setTimeOut(self.loopTimeout);
 
     };
+
     /**    
-    * Send a message and wait for echo    
+    * Send a message and wait for echo  
+    * @param {Object} msg - Customized message object, will be stringified to JSON
+    * @param {String|null} contentType - Default is 'application/x-cloud-snipd'
+    * @param {Comet~echoCallback} echoCb - Handling the echo event
     */    
     this.sendMsg = function (msg, contentType, echoCb) {
         var sid = uuid.v4();
@@ -202,16 +206,25 @@ function Comet (id, req, resp) {
             }
         });
     };
+    /**
+     * This callback is displayed as part of the comet pack callback function.
+     * @callback Comet~echoCallback
+     * @param {object} echoMsg - Echo message object.
+     * @param {String} echoMsg.sid - sender id, same with the send message id.
+     */
 
     /**    
     * Send a message and do not wait for any echo
+    * @param {Object} msg - Customized message object, will be stringified to JSON
     */    
     this.directSend = function (msg) {
         this._send(msg);
     };
 
     /**    
-    * Echo a message corresponding to a send    
+    * Echo a message corresponding to a send
+    * @param {object} msg - Echo message object.
+    * @param {String} msg.sid - sender id, same with the send message id.
     */    
     this.echoMsg = function (msg) {
         var sid = msg.sid;
@@ -225,6 +238,9 @@ function Comet (id, req, resp) {
 
     /**    
     * Pong a message back after a client ping    
+    * @param {object} msg - pong message object.
+    * @param {String} msg.interval - ping/pong interval(millisec) supplied by client.
+    * @param {String|null} contentType - Default is 'application/x-cloud-snipd'
     */    
     this.pongMsg = function (msg, contentType) {
         var self = this;
@@ -256,7 +272,7 @@ function Comet (id, req, resp) {
         self._remove();
     };
 
-    //internal   
+    /** internal function for sending one data */
     this._send = function (msg, prefix, contentType) {
         if (!prefix) {
             prefix = '';
@@ -299,6 +315,7 @@ function Comet (id, req, resp) {
         } 
     };
 
+    /** internal function for closing connection */
     this._close = function(reason) {
         if (!reason) {
             reason = this.CODE.CLOSE_COMPEL
@@ -307,13 +324,14 @@ function Comet (id, req, resp) {
         this.resp.end();
     };
 
-    //internal
+    /** internal function for broadcasting error */
     this._error = function (err) {
         if (this.errFunc) {
             this.errFunc(err);
         }
     };
 
+    /** internal function for removing self, and notifying handler */
     this._remove = function () {
         if (this.timeId != 0 ){
             clearTimeout(this.timeId);
@@ -324,6 +342,7 @@ function Comet (id, req, resp) {
         }
     };
 
+    /** internal function for ping timeout handling */
     this._setTimeOut = function (msec) {
         var self = this;
         if (self.timeId != 0 ){
@@ -353,13 +372,17 @@ function Comet (id, req, resp) {
 
 /*
 * comet manager
+* @global cometMgr, for multiple comets monitoring and manipulating
 */
 var cometMgr = exports = module.exports = {    
     comets: {}, 
     sendIds: {},
     keyMap: {},
     /**    
-    * API    
+    * create and return a comet
+    * @param {String|null} cid - Comet id, it will create a random id if param is null
+    * @param {Object} req - A http request structure
+    * @param {Object} resp - A http response structure
     */    
     createComet: function (cid, req, resp) {
         var self = this;
@@ -380,14 +403,21 @@ var cometMgr = exports = module.exports = {
             }
         });
         return comet;    
-    },    
+    }, 
+
     /**    
-    * API    
+    * get comet by comet id
+    * @param {String} cid - Comet id
     */    
     getComet: function (cid) {    
         return this.comets[cid];    
     },    
-
+   
+    /**    
+    * map a comet with a key
+    * @param {String} key - Defined by user
+    * @param {String} cid - Comet id
+    */    
     mapComet: function (key, cid) {
         if (!this.keyMap[key]) {
             this.keyMap[key] = {visits: 0, lastVisit: Date.now(), alive: Date.now()};
@@ -402,6 +432,11 @@ var cometMgr = exports = module.exports = {
         }
     },
 
+    /**    
+    * find a comet by key
+    * @param {String} key - Defined by user
+    * @returns {Object} comet - Comet object, null if not found.
+    */    
     findComet: function (key) {
         var elem = this.keyMap[key];
         if (!elem) {
@@ -409,6 +444,19 @@ var cometMgr = exports = module.exports = {
             return null;
         }
         return this.comets[elem.cid];
+    },
+
+    /**    
+    * get comet by sender id
+    * @param {String} sid - Sender id
+    * @returns {Object} comet - Comet which send message with the sid, null if not found.
+    */ 
+    getCometBySendId: function (sid) {
+        var cid = this.sendIds[sid];
+        if (!cid) {
+            return null;
+        }
+        return this.comets[cid]; 
     },
 
     getCometsCountLive: function() {
@@ -464,16 +512,6 @@ var cometMgr = exports = module.exports = {
     _unregSendId: function (sid) {
         console.log('comet:', this.sendIds[sid], 'remove sender', sid);
         delete this.sendIds[sid];
-    },
-    /**    
-    * API    
-    */ 
-    getCometBySendId: function (sid) {
-        var cid = this.sendIds[sid];
-        if (!cid) {
-            return null;
-        }
-        return this.comets[cid]; 
     },
     //internal
     _deleteComet: function (cid) {
